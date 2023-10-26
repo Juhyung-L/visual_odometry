@@ -7,21 +7,46 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "std_msgs/msg/color_rgba.hpp"
 
+// class for storing all the information related to an image frame
+class FrameInfo
+{
+public:
+    FrameInfo()
+    {
+
+    }
+
+    void clearInfo()
+    {
+        kps.clear();
+        filt_kps.clear();
+        tri_kps.clear();
+        idx_filt_pairs.clear();
+    }
+
+    std::vector<cv::KeyPoint> kps;
+    cv::Mat desc;
+    cv::Matx44d T = cv::Matx44d::eye(); // identity transformation matrix
+    std::vector<cv::Point3d> tri_kps;
+    std::vector<cv::Point2d> filt_kps;
+    std::vector<std::pair<size_t, cv::Point3d>> idx_filt_pairs;
+private:
+};
+
 class OrbSLAM
 {
 public:
-    OrbSLAM(cv::Matx33d K): K(K)
+    OrbSLAM(cv::Matx33d K, cv::Size img_size): K(K), img_size(img_size)
     {
         orb = cv::ORB::create(3000); // 3000 max features
         bf = cv::BFMatcher::create(cv::NORM_HAMMING2);
         poses.push_back(cv::Point3d(0.0, 0.0, 0.0));
     }
 
-    void extract(cv::Mat& frame)
+    void process_frame(cv::Mat& frame)
     {
-        // clear key points
-        filt_kps.clear();
-        prev_filt_kps.clear();
+        prev_fi = fi; // store current frame information
+        fi.clearInfo();
 
         // detect features
         cv::Mat gray_frame;
@@ -35,65 +60,158 @@ public:
             3
         );
 
-        std::vector<cv::KeyPoint> kps;
-        cv::Mat desc;
         // extract key points
-        kps.reserve(feats.size());
+        fi.kps.reserve(feats.size());
         for (cv::Point2d& feat : feats)
         {
-            kps.emplace_back(feat, 20); // key point diameter is 20
+            fi.kps.emplace_back(feat, 20); // key point diameter is 20
         }
         // compute descriptors for the key points
-        orb->compute(frame, kps, desc);
+        orb->compute(frame, fi.kps, fi.desc);
 
         // match
         std::vector<std::vector<cv::DMatch>> matches;
         std::vector<cv::Point2d> matched_kps, prev_matched_kps;
-        std::vector<uchar> inliers;
+        std::vector<cv::Point2d> filt_kps, prev_filt_kps;
+        std::vector<size_t> matched_idx, filt_idx, prev_matched_idx, prev_filt_idx;
+        std::vector<std::pair<size_t, cv::Point3d>> prev_idx_filt_pairs;
         cv::Matx33d E, R;
         cv::Matx31d t;
-        if (!prev_desc.empty())
+        std::vector<uchar> inlier_mask;
+
+        if (!prev_fi.desc.empty())
         {
-            bf->knnMatch(desc, prev_desc, matches, 3);
+            bf->knnMatch(fi.desc, prev_fi.desc, matches, 3);
             // Lowe's ratio test to remove bad matches
             for (size_t i=0; i<matches.size(); ++i)
             {
                 if (matches[i][0].distance < 0.8*matches[i][1].distance)
                 {
-                    matched_kps.push_back(kps[matches[i][0].queryIdx].pt);
-                    prev_matched_kps.push_back(prev_kps[matches[i][0].trainIdx].pt);
+                    matched_kps.push_back(fi.kps[matches[i][0].queryIdx].pt);
+                    prev_matched_kps.push_back(prev_fi.kps[matches[i][0].trainIdx].pt);
+                    matched_idx.push_back(matches[i][0].queryIdx);
+                    prev_matched_idx.push_back(matches[i][0].trainIdx);
                 }
             }
+            assert(matched_kps.size() == prev_matched_kps.size()); // make sure number of matched key points are the same
 
-            // filter (using fundamental matrix)
-            cv::findFundamentalMat(matched_kps, prev_matched_kps, cv::FM_RANSAC, 3, 0.99, 500, inliers);
-            for (size_t i=0; i<matched_kps.size(); ++i)
+            int inlier_count;
+            E = cv::findEssentialMat(matched_kps, prev_matched_kps, K, cv::FM_RANSAC, 0.99, 1, 1000, inlier_mask);
+            inlier_count = cv::recoverPose(E, matched_kps, prev_matched_kps, K, R, t, inlier_mask);
+            
+            // make filt_kps, prev_filt_kps, filt_prev_kps_idx
+            for (size_t i=0; i<inlier_mask.size(); ++i)
             {
-                if (inliers[i])
+                if (inlier_mask[i])
                 {
                     filt_kps.push_back(matched_kps[i]);
                     prev_filt_kps.push_back(prev_matched_kps[i]);
+                    filt_idx.push_back(matched_idx[i]);
+                    prev_filt_idx.push_back(prev_matched_idx[i]);
+                }
+            }
+            fi.filt_kps = filt_kps; // ?
+
+            std::cout << "Inlier count: " << inlier_count << std::endl;
+            if (inlier_count < min_inlier_count)
+            {
+                std::cout << "Inlier count below threshold, skipping this frame...\n";
+                return;
+            }
+
+            // update transformation matix
+            fi.T = prev_fi.T * cv::Matx44d(R(0,0), R(0,1), R(0,2), t(0,0),
+                                           R(1,0), R(1,1), R(1,2), t(1,0),
+                                           R(2,0), R(2,1), R(2,2), t(2,0),
+                                           0.0,    0.0,    0.0,    1.0);
+
+            // get projection matrices
+            cv::Matx34d proj_mat, prev_proj_mat;
+            proj_mat = K * cv::Matx34d(fi.T(0,0), fi.T(0,1), fi.T(0,2), fi.T(0,3),
+                                       fi.T(1,0), fi.T(1,1), fi.T(1,2), fi.T(1,3),
+                                       fi.T(2,0), fi.T(2,1), fi.T(2,2), fi.T(2,3));
+            prev_proj_mat = K * cv::Matx34d(prev_fi.T(0,0), prev_fi.T(0,1), prev_fi.T(0,2), prev_fi.T(0,3),
+                                            prev_fi.T(1,0), prev_fi.T(1,2), prev_fi.T(1,2), prev_fi.T(1,3),
+                                            prev_fi.T(2,0), prev_fi.T(2,1), prev_fi.T(2,2), prev_fi.T(2,3));
+
+            // get 3D points of filt kps by triangulation (frame -> world transform)
+            // for some reason, filt_kps and prev_filt_kps can't be vector of Point2i even though they are pixel coordinates
+            cv::Mat tri_kps_hom(4, filt_kps.size(), CV_64F);
+            cv::triangulatePoints(proj_mat, prev_proj_mat, filt_kps, prev_filt_kps, tri_kps_hom);
+            cv::convertPointsFromHomogeneous(tri_kps_hom.t(), fi.tri_kps);
+
+            // make pair
+            for (size_t i=0; i<fi.tri_kps.size(); ++i)
+            {
+                fi.idx_filt_pairs.push_back(std::make_pair(filt_idx[i], fi.tri_kps[i]));
+                prev_idx_filt_pairs.push_back(std::make_pair(prev_filt_idx[i], fi.tri_kps[i]));
+            }
+
+            // sort pairs
+            std::sort(fi.idx_filt_pairs.begin(), fi.idx_filt_pairs.end(), 
+                [](const std::pair<int, cv::Point3d>& a, const std::pair<int, cv::Point3d>& b)
+                {return a.first < b.first;}
+            );
+            std::sort(prev_idx_filt_pairs.begin(), prev_idx_filt_pairs.end(), 
+                [](const std::pair<int, cv::Point3d>& a, const std::pair<int, cv::Point3d>& b)
+                {return a.first < b.first;}
+            );
+
+            // corr_idx maps index of prev_fi.idx_filt_pairs to fi.idx_filt_pairs
+            // that are the same point in 3D space
+            std::vector<std::pair<size_t, size_t>> corr_idx;
+            if (!prev_fi.idx_filt_pairs.empty())
+            {
+                // find correspondence
+                auto prev_it = prev_fi.idx_filt_pairs.begin();
+                auto it = prev_idx_filt_pairs.begin();
+
+                while (prev_it != prev_fi.idx_filt_pairs.end() &&
+                       it != prev_idx_filt_pairs.end())
+                {
+                    if (it == prev_idx_filt_pairs.end())
+                    {
+                        ++prev_it;
+                        continue;
+                    }
+                    if (prev_it == prev_fi.idx_filt_pairs.end())
+                    {
+                        ++it;
+                        continue;
+                    }
+
+                    if (it->first > prev_it->first)
+                    {
+                        ++prev_it;
+                    }
+                    else if (it->first < prev_it->first)
+                    {
+                        ++it;
+                    }
+                    else if (it->first == prev_it->first) // found corresponding point
+                    {
+                        size_t prev_idx = std::distance(prev_fi.idx_filt_pairs.begin(), prev_it);
+                        size_t idx = std::distance(prev_idx_filt_pairs.begin(), it);
+                        corr_idx.push_back(std::make_pair(prev_idx, idx));
+                        ++prev_it;
+                        ++it;
+                    }
                 }
             }
 
-            E = cv::findEssentialMat(filt_kps, prev_filt_kps, K, cv::FM_RANSAC, 0.99, 3, 500);
-            cv::recoverPose(E, filt_kps, prev_filt_kps, K, R, t);
+            // find the scale for translation vector
+            cv::Point3d avg_diff;
+            for (size_t i=0; i<corr_idx.size(); ++i)
+            {
+                cv::Point3d diff = prev_fi.idx_filt_pairs[corr_idx[i].first].second - fi.idx_filt_pairs[corr_idx[i].second].second;
+                avg_diff += diff;
+                std::cout << diff << std::endl;
+            }
+            avg_diff /= (double)corr_idx.size();
+            std::cout << "Calculated translation vector:\n" << t << std::endl;
+            std::cout << "Avg_diff:\n" << avg_diff << std::endl;
 
-            cv::Point3d pose = poses.back();
-            applyTransformation(pose, R, t);
-            poses.push_back(pose);
-        }
-        prev_kps = kps; // store current key points
-        prev_desc = desc; // store current key point descriptions
-    }
-
-    void process_frame(cv::Mat& frame)
-    {
-        extract(frame);
-        for (size_t i=0; i<filt_kps.size(); ++i)
-        {
-            cv::circle(frame, filt_kps[i], 5, cv::Scalar(0.0, 0.0, 255));
-            cv::line(frame, filt_kps[i], prev_filt_kps[i], cv::Scalar(255, 0.0, 0.0), 1);
+            ;
         }
     }
 
@@ -110,14 +228,28 @@ public:
     }
 
     std::vector<cv::Point3d> poses;
+    FrameInfo fi, prev_fi;
 
 private:
+    bool samePoint(cv::Point2d& p1, cv::Point2d& p2)
+    {
+        if (p1.x - p2.x < epsilon &&
+            p1.y - p2.y < epsilon)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    bool epsilon = 0.01;
     std::shared_ptr<cv::ORB> orb;
     std::shared_ptr<cv::BFMatcher> bf;
-    cv::Mat prev_desc;
-    std::vector<cv::KeyPoint> prev_kps;
-    std::vector<cv::Point2d> filt_kps, prev_filt_kps;
     cv::Matx33d K;
+    cv::Size img_size;
+    int min_inlier_count = 25;
 };
 
 void printOdom(const cv::Point3d& pose, const cv::Point3d& prev_pose, 
@@ -156,6 +288,13 @@ void printOdom(const cv::Point3d& pose, const cv::Point3d& prev_pose,
 
 int main(int argc, char* argv[])
 {
+
+    bool debug = false;
+    if (argc > 1 && strcmp("debug", argv[1]))
+    {
+        debug = true;
+    }
+
     rclcpp::init(argc, argv);
     cv::Size img_size;
     
@@ -165,7 +304,6 @@ int main(int argc, char* argv[])
         0.000000000000e+00, 7.188560000000e+02, 1.852157000000e+02,
         0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00
     );
-    OrbSLAM orb(K);
 
     cv::VideoCapture cap("/home/dev_ws/visual_slam/data/video_0.mp4");
     if (!cap.isOpened())
@@ -177,7 +315,7 @@ int main(int argc, char* argv[])
     double fps = cap.get(cv::CAP_PROP_FPS);
 
     // get image size
-    cv::Mat frame;
+    cv::Mat frame(img_size, CV_64FC3);
     bool first_ret = cap.read(frame);
     if (!first_ret)
     {
@@ -185,12 +323,16 @@ int main(int argc, char* argv[])
         return -1;
     }
     img_size = frame.size();
+    OrbSLAM orb(K, img_size);
 
     auto node = std::make_shared<rclcpp::Node>("rviz_pub");
     auto odom_pub = node->create_publisher<visualization_msgs::msg::Marker>("visual_odom", 10);
 
     cv::Point3d prev_pose;
-    while (true)
+    cv::Mat prev_frame(img_size, CV_64FC3); // for debug
+    cv::Mat two_frames(img_size*2, CV_64FC3);
+    bool first_frame = true;
+    while (rclcpp::ok())
     {
         bool ret = cap.read(frame);
 
@@ -199,21 +341,67 @@ int main(int argc, char* argv[])
             fprintf(stderr, "Failed to read frame.\n");
             break;   
         }
-        cv::resize(frame, frame, img_size, 1.0, 1.0, cv::INTER_LINEAR);
 
-        // process frame
-        orb.process_frame(frame);
-        if (orb.poses.size() >= 2)
+        if (!debug)
         {
-            printOdom(orb.poses.back(), prev_pose, odom_pub, node);
-        }
-        prev_pose = orb.poses.back();
+            // process frame
+            orb.process_frame(frame);
 
-        cv::imshow("frame", frame);
-        if (cv::waitKey(fps) == 'q')
-        {
-            break;
+            // visualize key points
+            // for (size_t i=0; i<orb.prev_filt_kps.size(); ++i)
+            // {
+            //     cv::circle(frame, orb.filt_kps[i], 3, cv::Scalar(255, 0.0, 0.0));
+            //     cv::line(frame, orb.filt_kps[i], orb.prev_filt_kps[i], cv::Scalar(0.0, 255, 0.0));
+            // }
+            
+            // // visualize odomtery
+            // if (orb.poses.size() >= 2)
+            // {
+            //     printOdom(orb.poses.back(), prev_pose, odom_pub, node);
+            // }
+            // prev_pose = orb.poses.back();
+
+            cv::imshow("frame", frame);
+            if (cv::waitKey(fps) == 'q')
+            {
+                break;
+            }
         }
+        else
+        {
+            // show previous frame on top of current frame
+            orb.process_frame(frame);
+
+            // visualize common kps
+            if (!first_frame)
+            {      
+                // visualize key points
+                // for (size_t i=0; i<orb.filt_kps.size(); ++i)
+                // {
+                //     cv::circle(frame, orb.filt_kps[i], 3, cv::Scalar(255, 0.0, 0.0));
+                // }
+                // for (size_t i=0; i<orb.prev_fi.filt_kps.size(); ++i)
+                // {
+                //     cv::circle(prev_frame, orb.prev_fi.filt_kps[i], 3, cv::Scalar(255, 0.0, 0.0));
+                // }
+
+                // for (size_t i=0; i<orb.common_filt_kps_idx.size(); ++i)
+                // {
+                //     cv::circle(prev_frame, orb.prev_fi.filt_kps[orb.common_filt_kps_idx[i]], 5, cv::Scalar(0.0, 0.0, 255));
+                //     cv::circle(frame, orb.filt_kps[orb.common_filt_kps_idx[i]], 5, cv::Scalar(0.0, 0.0, 255));
+                // }
+
+                cv::vconcat(frame, prev_frame, two_frames);
+                cv::imshow("two_frames", two_frames);
+                if (cv::waitKey(0) == 'q')
+                {
+                    break;
+                }
+            }
+            prev_frame = frame.clone();
+            first_frame = false;
+        }
+        
     }
     cap.release();
     cv::destroyAllWindows();
