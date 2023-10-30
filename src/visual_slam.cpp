@@ -53,13 +53,14 @@ public:
 private:
 };
 
-class OrbSLAM
+class VisualOdometry
 {
 public:
-    OrbSLAM(cv::Matx33d K, cv::Size img_size): K(K), img_size(img_size)
+    VisualOdometry(cv::Matx33d K, cv::Size img_size): K(K), img_size(img_size)
     {
-        orb = cv::ORB::create(3000); // 3000 max features
-        bf = cv::BFMatcher::create(cv::NORM_HAMMING2);
+        sift = cv::SIFT::create();
+        fbm = cv::FlannBasedMatcher::create();
+        bf = cv::BFMatcher::create();
         poses.push_back(cv::Vec4d(0.0, 0.0, 0.0, 1.0));
 
     }
@@ -75,28 +76,15 @@ public:
         cv::Mat gray_img;
         cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);
         std::vector<cv::Point2d> feats;
-        cv::goodFeaturesToTrack(
-            gray_img,
-            feats,
-            3000,
-            0.01,
-            3
-        );
 
-        // extract key points
-        frame.kps.reserve(feats.size());
-        for (cv::Point2d& feat : feats)
-        {
-            frame.kps.emplace_back(feat, 20); // key point diameter is 20
-        }
-        // compute descriptors for the key points
-        orb->compute(gray_img, frame.kps, frame.desc);
-
+        // using sift feature extractor
+        sift->detectAndCompute(gray_img, cv::Mat(), frame.kps, frame.desc);
+        
         // match
         std::vector<std::vector<cv::DMatch>> matches;
         std::vector<cv::Point2d> matched_kps, prev_matched_kps;
-        std::vector<cv::Point2d> filt_kps, prev_framelt_kps;
-        std::vector<size_t> matched_idx, filt_idx, prev_matched_idx, prev_framelt_idx;
+        std::vector<cv::Point2d> filt_kps, prev_filt_kps;
+        std::vector<size_t> matched_idx, filt_idx, prev_matched_idx, prev_filt_idx;
         // std::vector<helper_kp> prev_helper_kps;
         cv::Matx33d E, R;
         cv::Vec3d t;
@@ -109,7 +97,7 @@ public:
             // Lowe's ratio test to remove bad matches
             for (size_t i=0; i<matches.size(); ++i)
             {
-                if (matches[i][0].distance < 0.8*matches[i][1].distance)
+                if (matches[i][0].distance < 0.8*matches[i][1].distance) // a good best match has significantly lower distance than second-best match
                 {
                     matched_kps.push_back(frame.kps[matches[i][0].queryIdx].pt);
                     matched_idx.push_back(matches[i][0].queryIdx);
@@ -126,8 +114,7 @@ public:
             // because recoverPose() uses left-handed frame (?)
             R = R.t();
             t *= -1.0;
-
-            // make filt_kps, prev_framelt_kps, filt_prev_kps_idx
+            
             for (size_t i=0; i<inlier_mask.size(); ++i)
             {
                 if (inlier_mask[i])
@@ -135,30 +122,30 @@ public:
                     filt_kps.push_back(matched_kps[i]);
                     filt_idx.push_back(matched_idx[i]);
 
-                    prev_framelt_kps.push_back(prev_matched_kps[i]);
-                    prev_framelt_idx.push_back(prev_matched_idx[i]);
+                    prev_filt_kps.push_back(prev_matched_kps[i]);
+                    prev_filt_idx.push_back(prev_matched_idx[i]);
                 }
             }
 
-            if (inlier_count < min_inlier_count)
+            if (inlier_count < min_recover_pose_inlier_count)
             {
-                std::cout << "Inlier count below threshold, skipping this frame...\n";
+                std::cout << "recoverPose inlier count below threshold. Skipping this frame.\n";
                 return;
             }
 
-            // update transformation matix
-            frame.T = prev_frame.T * cv::Matx44d(R(0,0), R(0,1), R(0,2), t(0),
-                                           R(1,0), R(1,1), R(1,2), t(1),
-                                           R(2,0), R(2,1), R(2,2), t(2),
-                                           0.0,    0.0,    0.0,    1.0);
+            // get new transformation matix
+            cv::Matx44d T = prev_frame.T * cv::Matx44d(R(0,0), R(0,1), R(0,2), t(0),
+                                                       R(1,0), R(1,1), R(1,2), t(1),
+                                                       R(2,0), R(2,1), R(2,2), t(2),
+                                                       0.0,    0.0,    0.0,    1.0);
             
             // get projection matrices
-            P = getProjectionMat(frame.T, K);
+            P = getProjectionMat(T, K);
             prev_P = getProjectionMat(prev_frame.T, K);
 
             // get 3D points of filt kps by triangulation (frame -> world transform)
             cv::Mat tri_kps_hom;
-            cv::triangulatePoints(prev_P, P, prev_framelt_kps, filt_kps, tri_kps_hom);
+            cv::triangulatePoints(prev_P, P, prev_filt_kps, filt_kps, tri_kps_hom);
             cv::convertPointsFromHomogeneous(tri_kps_hom.t(), frame.tri_kps);
 
             // print rotation and translation values
@@ -173,7 +160,7 @@ public:
             for (size_t i=0; i<frame.tri_kps.size(); ++i)
             {
                 frame.helper_kps.emplace_back(filt_idx[i], frame.tri_kps[i], filt_kps[i]);
-                prev_helper_kps.emplace_back(prev_framelt_idx[i], frame.tri_kps[i], filt_kps[i]);
+                prev_helper_kps.emplace_back(prev_filt_idx[i], frame.tri_kps[i], filt_kps[i]);
             }
             
             // sort pairs
@@ -217,17 +204,47 @@ public:
                 }
             }
 
-            // find the scale for translation vector
-            cv::Point3d avg_diff;
+            // find the correction for translation vector
+            std::vector<std::pair<double, cv::Vec3d>> norm_vec_pairs(corr_idx.size());
+            cv::Matx33d global_R = T.get_minor<3, 3>(0, 0);
             for (size_t i=0; i<corr_idx.size(); ++i)
             {
-                cv::Point3d diff = prev_frame.helper_kps[corr_idx[i].first].tri_kp - prev_helper_kps[corr_idx[i].second].tri_kp;
-                avg_diff += diff;
-                // std::cout << diff << std::endl;
+                cv::Vec3d diff = prev_frame.helper_kps[corr_idx[i].first].tri_kp - prev_helper_kps[corr_idx[i].second].tri_kp;
+                diff = global_R.t() * diff; // perspective transform
+                norm_vec_pairs.push_back(std::make_pair(cv::norm(diff), diff));
             }
-            avg_diff /= (double)corr_idx.size();
-            std::cout << "Calculated translation vector:\n" << t << std::endl;
-            std::cout << "Avg_diff:\n" << avg_diff << std::endl;
+            // find the median
+            std::sort(norm_vec_pairs.begin(), norm_vec_pairs.end(),
+                [](const std::pair<double, cv::Vec3d>& a, const std::pair<double, cv::Vec3d>& b)
+                {return a.first < b.first;}
+            );
+
+            // calculate t_correction
+            size_t n = norm_vec_pairs.size();
+            if (n > min_corr_idx_count)
+            {
+                if (n % 2 == 0) // even
+                {
+                    t_correction = (norm_vec_pairs[n/2-1].second + norm_vec_pairs[n/2].second) / 2;
+                }
+                else // odd
+                {
+                    t_correction = norm_vec_pairs[n/2].second;
+                }
+            }
+            else
+            {
+                std::cout << "corr_idx count below threshold. Using previous t_correction.\n";
+            }            
+            // std::cout << "Calculated t:" << t << std::endl;
+            // std::cout << "Correction t:" << t_correction << std::endl;
+
+            // correct the translation and update the transformation matrix
+            t += t_correction;
+            frame.T = prev_frame.T * cv::Matx44d(R(0,0), R(0,1), R(0,2), t(0),
+                                                 R(1,0), R(1,1), R(1,2), t(1),
+                                                 R(2,0), R(2,1), R(2,2), t(2),
+                                                 0.0,    0.0,    0.0,    1.0);
 
             // update pose
             cv::Vec4d pose = frame.T * cv::Vec4d(0.0, 0.0, 0.0, 1.0);
@@ -251,19 +268,24 @@ public:
     std::vector<std::pair<size_t, size_t>> corr_idx;
 
 private:
-    std::shared_ptr<cv::ORB> orb;
+    std::shared_ptr<cv::SIFT> sift;
+    std::shared_ptr<cv::FlannBasedMatcher> fbm;
     std::shared_ptr<cv::BFMatcher> bf;
     cv::Matx33d K;
     cv::Size img_size;
-    int min_inlier_count = 25;
-    cv::Matx44d conv_rot;
+    cv::Vec3d t_correction;
+
+    // constants
+    const int min_recover_pose_inlier_count = 150;
+    const size_t min_corr_idx_count = 150;
 };
 
 void printTriangulatedPts(
     const std::vector<helper_kp>& prev_helper_kps,
     const std::vector<helper_kp>& helper_kps,
     const std::vector<std::pair<size_t, size_t>> corr_idx,
-    const rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr& pub, const rclcpp::Node::SharedPtr& node)
+    const rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr& pub, const rclcpp::Node::SharedPtr& node,
+    bool debug=false)
 {
     visualization_msgs::msg::Marker m;
     m.header.frame_id = "map";
@@ -273,9 +295,12 @@ void printTriangulatedPts(
     m.id = node->now().nanoseconds();
     m.type = visualization_msgs::msg::Marker::POINTS;
     m.color.a = 1.0;
-    m.color.r = dis(gen);
-    m.color.g = dis(gen);
-    m.color.b = dis(gen);
+    // m.color.r = dis(gen);
+    // m.color.g = dis(gen);
+    // m.color.b = dis(gen);
+    m.color.r = 0.0;
+    m.color.g = 1.0;
+    m.color.b = 0.0;
     m.scale.x = 0.1;
     m.scale.y = 0.1;
     m.action = visualization_msgs::msg::Marker::ADD;
@@ -290,40 +315,58 @@ void printTriangulatedPts(
     }
     pub->publish(m);
     
-    m.points.clear();
-    m.color.a = 1.0;
-    m.color.r = dis(gen);
-    m.color.g = dis(gen);
-    m.color.b = dis(gen);
-    for (size_t i=0; i<helper_kps.size(); ++i)
+    if (debug)
     {
-        p.x = helper_kps[i].tri_kp.x;
-        p.y = helper_kps[i].tri_kp.y;
-        p.z = helper_kps[i].tri_kp.z;
-        m.points.push_back(p);
+        m.points.clear();
+        m.header.frame_id = "map";
+        m.header.stamp = node->now();
+        m.lifetime = rclcpp::Duration::from_seconds(0);
+        m.frame_locked = false;
+        m.id = node->now().nanoseconds();
+        m.type = visualization_msgs::msg::Marker::POINTS;
+        m.color.a = 1.0;
+        m.color.r = dis(gen);
+        m.color.g = dis(gen);
+        m.color.b = dis(gen);
+        m.scale.x = 0.1;
+        m.scale.y = 0.1;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        for (size_t i=0; i<helper_kps.size(); ++i)
+        {
+            p.x = helper_kps[i].tri_kp.x;
+            p.y = helper_kps[i].tri_kp.y;
+            p.z = helper_kps[i].tri_kp.z;
+            m.points.push_back(p);
+        }
+        pub->publish(m);
+
+        m.points.clear();
+        m.header.frame_id = "map";
+        m.header.stamp = node->now();
+        m.lifetime = rclcpp::Duration::from_seconds(0);
+        m.frame_locked = false;
+        m.id = node->now().nanoseconds();
+        m.type = visualization_msgs::msg::Marker::LINE_LIST;
+        m.scale.x = 0.01;
+        m.color.a = 1.0;
+        m.color.r = 0.0;
+        m.color.g = 1.0;
+        m.color.b = 0.0;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        for(size_t i=0; i<corr_idx.size(); ++i)
+        {
+            p.x = prev_helper_kps[corr_idx[i].first].tri_kp.x;
+            p.y = prev_helper_kps[corr_idx[i].first].tri_kp.y;
+            p.z = prev_helper_kps[corr_idx[i].first].tri_kp.z;
+            m.points.push_back(p);
+
+            p.x = helper_kps[corr_idx[i].second].tri_kp.x;
+            p.y = helper_kps[corr_idx[i].second].tri_kp.y;
+            p.z = helper_kps[corr_idx[i].second].tri_kp.z;
+            m.points.push_back(p);
+        }
+        pub->publish(m);
     }
-    pub->publish(m);
-
-    // m.points.clear();
-    // m.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    // m.scale.x = 1.0;
-    // m.color.a = 1.0;
-    // m.color.r = 0.0;
-    // m.color.g = 1.0;
-    // m.color.b = 0.0;
-    // for(size_t i=0; i<corr_idx.size(); ++i)
-    // {
-    //     p.x = prev_helper_kps[corr_idx[i].first].tri_kp.x;
-    //     p.y = prev_helper_kps[corr_idx[i].first].tri_kp.y;
-    //     p.z = prev_helper_kps[corr_idx[i].first].tri_kp.z;
-    //     m.points.push_back(p);
-
-    //     p.x = prev_helper_kps[corr_idx[i].second].tri_kp.x;
-    //     p.y = prev_helper_kps[corr_idx[i].second].tri_kp.y;
-    //     p.z = prev_helper_kps[corr_idx[i].second].tri_kp.z;
-    //     m.points.push_back(p);
-    // }
-    // pub->publish(m);
 }
 
 void printOdom(const cv::Vec4d& pose, const cv::Vec4d& prev_pose, 
@@ -336,7 +379,7 @@ void printOdom(const cv::Vec4d& pose, const cv::Vec4d& prev_pose,
     m.frame_locked = false;
     m.id = node->now().nanoseconds();
     m.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    m.scale.x = 1.0;
+    m.scale.x = 0.1;
     // make sure alpha and color is set or else the points will be invisible
     m.color.a = 1.0;
     m.color.r = 1.0;
@@ -370,7 +413,7 @@ int main(int argc, char* argv[])
     rclcpp::init(argc, argv);
     cv::Size img_size;
     
-    // set camera intrinsic matrix
+    // camera intrinsic matrix obtained from KITTI's calibration.txt file
     cv::Matx33d K(
         7.188560000000e+02, 0.000000000000e+00, 6.071928000000e+02,
         0.000000000000e+00, 7.188560000000e+02, 1.852157000000e+02,
@@ -395,7 +438,7 @@ int main(int argc, char* argv[])
         return -1;
     }
     img_size = img.size();
-    OrbSLAM orb(K, img_size);
+    VisualOdometry VO(K, img_size);
 
     auto node = std::make_shared<rclcpp::Node>("rviz_pub");
     auto odom_pub = node->create_publisher<visualization_msgs::msg::Marker>("visual_odom", 10);
@@ -417,21 +460,20 @@ int main(int argc, char* argv[])
 
         if (!debug)
         {
-            orb.process_img(img);
+            VO.process_img(img);
 
             // visualize key points
-            // for (size_t i=0; i<orb.prev_framelt_kps.size(); ++i)
-            // {
-            //     cv::circle(img, orb.filt_kps[i], 3, cv::Scalar(255, 0.0, 0.0));
-            //     cv::line(img, orb.filt_kps[i], orb.prev_framelt_kps[i], cv::Scalar(0.0, 255, 0.0));
-            // }
+            for (size_t i=0; i<VO.prev_frame.helper_kps.size(); ++i)
+            {
+                cv::circle(img, VO.prev_frame.helper_kps[i].filt_kp, 3, cv::Scalar(255, 0.0, 0.0));
+            }
             
-            // // visualize odomtery
-            // if (orb.poses.size() >= 2)
-            // {
-            //     printOdom(orb.poses.back(), prev_pose, odom_pub, node);
-            // }
-            // prev_pose = orb.poses.back();
+            // print triangulated points
+            printTriangulatedPts(VO.prev_frame.helper_kps, VO.prev_helper_kps, VO.corr_idx, tri_kps_pub, node, debug);
+            // print odometry
+            size_t curr_pose_idx = VO.poses.size() - 1;
+            size_t prev_pose_idx = curr_pose_idx - 1;
+            printOdom(VO.poses[curr_pose_idx], VO.poses[prev_pose_idx], odom_pub, node);
 
             cv::imshow("Front-facing camera", img);
             if (cv::waitKey(fps) == 'q')
@@ -441,38 +483,42 @@ int main(int argc, char* argv[])
         }
         else
         {
-            orb.process_img(img);
+            VO.process_img(img);
 
             if (!first_img)
             {
                 // print triangulated points
-                printTriangulatedPts(orb.prev_frame.helper_kps, orb.prev_helper_kps, orb.corr_idx, tri_kps_pub, node);
+                printTriangulatedPts(VO.prev_frame.helper_kps, VO.prev_helper_kps, VO.corr_idx, tri_kps_pub, node, debug);
                 // print odometry
-                size_t curr_pose_idx = orb.poses.size() - 1;
+                size_t curr_pose_idx = VO.poses.size() - 1;
                 size_t prev_pose_idx = curr_pose_idx - 1;
-                printOdom(orb.poses[curr_pose_idx], orb.poses[prev_pose_idx], odom_pub, node);
+                printOdom(VO.poses[curr_pose_idx], VO.poses[prev_pose_idx], odom_pub, node);
 
-                for (size_t i=0; i<orb.frame.helper_kps.size(); ++i)
+                // visualize filtered key points
+                for (size_t i=0; i<VO.frame.helper_kps.size(); ++i)
                 {
-                    cv::circle(img, orb.frame.helper_kps[i].filt_kp, 3, cv::Scalar(0.0, 0.0, 255));
+                    cv::circle(img, VO.frame.helper_kps[i].filt_kp, 3, cv::Scalar(0.0, 0.0, 255));
                 }
-                for (size_t i=0; i<orb.prev_frame.helper_kps.size(); ++i)
+                for (size_t i=0; i<VO.prev_frame.helper_kps.size(); ++i)
                 {
-                    cv::circle(prev_img, orb.prev_frame.helper_kps[i].filt_kp, 3, cv::Scalar(0.0, 0.0, 255));
+                    cv::circle(prev_img, VO.prev_frame.helper_kps[i].filt_kp, 3, cv::Scalar(0.0, 0.0, 255));
                 }
-                for (size_t i=0; i<orb.corr_idx.size(); ++i)
+
+                // highlight points that appears in consecutive feature matching
+                for (size_t i=0; i<VO.corr_idx.size(); ++i)
                 {
-                    cv::circle(img, orb.prev_helper_kps[orb.corr_idx[i].second].filt_kp, 5, cv::Scalar(0.0, 255, 0.0));
-                    cv::circle(prev_img, orb.prev_frame.helper_kps[orb.corr_idx[i].first].filt_kp, 5, cv::Scalar(0.0, 255, 0.0));
+                    cv::circle(img, VO.prev_helper_kps[VO.corr_idx[i].second].filt_kp, 5, cv::Scalar(0.0, 255, 0.0));
+                    cv::circle(prev_img, VO.prev_frame.helper_kps[VO.corr_idx[i].first].filt_kp, 5, cv::Scalar(0.0, 255, 0.0));
                 }
 
                 cv::vconcat(img, prev_img, two_imgs);
 
-                for (size_t i=0; i<orb.corr_idx.size(); ++i)
+                // draw correspondence lines
+                for (size_t i=0; i<VO.corr_idx.size(); ++i)
                 {
                     cv::line(two_imgs, 
-                        orb.prev_helper_kps[orb.corr_idx[i].second].filt_kp, 
-                        orb.prev_frame.helper_kps[orb.corr_idx[i].first].filt_kp + cv::Point2d(0.0, img_size.height),
+                        VO.prev_helper_kps[VO.corr_idx[i].second].filt_kp, 
+                        VO.prev_frame.helper_kps[VO.corr_idx[i].first].filt_kp + cv::Point2d(0.0, img_size.height),
                         cv::Scalar(0.0, 0.0, 255));
                 }
 
