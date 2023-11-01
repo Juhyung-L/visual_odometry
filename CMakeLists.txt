@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(visual_slam)
+project(visual_odometry)
 
 set(CMAKE_BUILD_TYPE Release)
 
@@ -29,9 +29,9 @@ set(dependencies
   std_msgs
 )
 
-add_executable(visual_slam src/visual_slam.cpp)
-target_link_libraries(visual_slam ${OpenCV_LIBRARIES})
-ament_target_dependencies(visual_slam ${dependencies})
+add_executable(visual_odometry src/visual_odometry.cpp)
+target_link_libraries(visual_odometry ${OpenCV_LIBRARIES})
+ament_target_dependencies(visual_odometry ${dependencies})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -46,7 +46,7 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS
-  visual_slam
+  visual_odometry
   DESTINATION lib/${PROJECT_NAME}
 )
 

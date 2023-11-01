@@ -14,7 +14,7 @@
 #include <string>
 #include <algorithm>
 
-#include "visual_slam/util.hpp"
+#include "visual_odometry/util.hpp"
 
 std::random_device rd;
 std::mt19937 gen(rd());
@@ -421,7 +421,7 @@ int main(int argc, char* argv[])
     );
 
     // path to video file
-    cv::VideoCapture cap("/home/dev_ws/visual_slam/data/video_2.mp4");
+    cv::VideoCapture cap("/home/dev_ws/visual_odometry/data/video_2.mp4");
     if (!cap.isOpened())
     {
         fprintf(stderr, "Error opening video.\n");
