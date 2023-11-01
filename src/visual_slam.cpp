@@ -25,11 +25,11 @@ namespace visual_odometry
 
 struct Point
 {
-    size_t kps_idx;
+    int kps_idx;
     cv::Point3d tri_kp;
     cv::Point2d filt_kp;
     cv::Vec3b color; // stored in BGR order
-    Point(size_t kps_idx, cv::Point3d tri_kp, cv::Point2d filt_kp, cv::Vec3b color): kps_idx(kps_idx), tri_kp(tri_kp), filt_kp(filt_kp), color(color)
+    Point(int kps_idx, cv::Point3d tri_kp, cv::Point2d filt_kp, cv::Vec3b color): kps_idx(kps_idx), tri_kp(tri_kp), filt_kp(filt_kp), color(color)
     {}
 };
 
@@ -60,7 +60,7 @@ class VisualOdometry
 public:
     VisualOdometry(cv::Matx33d K, cv::Size img_size): K(K), img_size(img_size)
     {
-        sift = cv::SIFT::create();
+        sift = cv::SIFT::create(5000);
         fbm = cv::FlannBasedMatcher::create();
         bf = cv::BFMatcher::create();
         poses.push_back(cv::Vec4d(0.0, 0.0, 0.0, 1.0));
@@ -86,7 +86,7 @@ public:
         std::vector<cv::Point2d> matched_kps, prev_matched_kps;
         std::vector<cv::Point2d> filt_kps, prev_filt_kps;
         std::vector<cv::Point3d> tri_kps;
-        std::vector<size_t> matched_idx, filt_idx, prev_matched_idx, prev_filt_idx;
+        std::vector<int> matched_idx, filt_idx, prev_matched_idx, prev_filt_idx;
         cv::Matx33d E, R;
         cv::Vec3d t;
         std::vector<uchar> inlier_mask;
@@ -94,9 +94,9 @@ public:
 
         if (!prev_frame.desc.empty())
         {
-            bf->knnMatch(frame.desc, prev_frame.desc, matches, 3);
+            fbm->knnMatch(frame.desc, prev_frame.desc, matches, 3);
             // Lowe's ratio test to remove bad matches
-            for (size_t i=0; i<matches.size(); ++i)
+            for (int i=0; i<matches.size(); ++i)
             {
                 if (matches[i][0].distance < 0.8*matches[i][1].distance) // a good best match has significantly lower distance than second-best match
                 {
@@ -116,7 +116,7 @@ public:
             R = R.t();
             t *= -1.0;
             
-            for (size_t i=0; i<inlier_mask.size(); ++i)
+            for (int i=0; i<inlier_mask.size(); ++i)
             {
                 if (inlier_mask[i])
                 {
@@ -157,7 +157,7 @@ public:
             //           << "z: " << angles[1] << std::endl;
             // std::cout << "Translation:\n" << t << std::endl;
 
-            for (size_t i=0; i<tri_kps.size(); ++i)
+            for (int i=0; i<tri_kps.size(); ++i)
             {
                 frame.points.emplace_back(filt_idx[i], tri_kps[i], filt_kps[i], img.at<cv::Vec3b>(filt_kps[i]));
                 prev_points.emplace_back(prev_filt_idx[i], tri_kps[i], prev_filt_kps[i], img.at<cv::Vec3b>(prev_filt_kps[i]));
@@ -191,8 +191,8 @@ public:
                     }
                     else if (it->kps_idx == prev_it->kps_idx) // found corresponding point
                     {
-                        size_t prev_idx = std::distance(prev_frame.points.begin(), prev_it);
-                        size_t idx = std::distance(prev_points.begin(), it);
+                        int prev_idx = std::distance(prev_frame.points.begin(), prev_it);
+                        int idx = std::distance(prev_points.begin(), it);
                         corr_idx.push_back(std::make_pair(prev_idx, idx));
                         ++prev_it;
                         ++it;
@@ -203,7 +203,7 @@ public:
             // find correction for translation vector
             std::vector<std::pair<double, cv::Vec3d>> norm_vec_pairs(corr_idx.size());
             cv::Matx33d global_R = T.get_minor<3, 3>(0, 0);
-            for (size_t i=0; i<corr_idx.size(); ++i)
+            for (int i=0; i<corr_idx.size(); ++i)
             {
                 cv::Vec3d diff = prev_frame.points[corr_idx[i].first].tri_kp - prev_points[corr_idx[i].second].tri_kp;
                 diff = global_R.t() * diff; // perspective transform
@@ -216,7 +216,8 @@ public:
             );
 
             // calculate t_correction
-            size_t n = norm_vec_pairs.size();
+            int n = norm_vec_pairs.size();
+            cv::Vec3d t_correction;
             if (n > min_corr_idx_count)
             {
                 if (n % 2 == 0) // even
@@ -230,7 +231,9 @@ public:
             }
             else
             {
-                std::cout << "corr_idx count below threshold. Using previous t_correction.\n";
+                std::cout << "corr_idx count below threshold. Skipping this frame.\n";
+                return;
+
             }            
             // std::cout << "Calculated t:" << t << std::endl;
             // std::cout << "Correction t:" << t_correction << std::endl;
@@ -261,7 +264,7 @@ public:
     std::vector<cv::Vec4d> poses;
     Frame frame, prev_frame;
     std::vector<Point> prev_points;
-    std::vector<std::pair<size_t, size_t>> corr_idx;
+    std::vector<std::pair<int, int>> corr_idx;
 
 private:
     std::shared_ptr<cv::SIFT> sift;
@@ -269,18 +272,17 @@ private:
     std::shared_ptr<cv::BFMatcher> bf;
     cv::Matx33d K;
     cv::Size img_size;
-    cv::Vec3d t_correction;
 
     // constants
     const int min_recover_pose_inlier_count = 150;
-    const size_t min_corr_idx_count = 150;
+    const int min_corr_idx_count = 150;
 };
 }
 
 void printTriangulatedPts(
     const std::vector<visual_odometry::Point>& prev_points,
     const std::vector<visual_odometry::Point>& points,
-    const std::vector<std::pair<size_t, size_t>> corr_idx,
+    const std::vector<std::pair<int, int>> corr_idx,
     const rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr& pub, const rclcpp::Node::SharedPtr& node,
     bool debug=false)
 {
@@ -299,7 +301,7 @@ void printTriangulatedPts(
     geometry_msgs::msg::Point p;
     std_msgs::msg::ColorRGBA c;
     c.a = 1.0;
-    for (size_t i=0; i<prev_points.size(); ++i)
+    for (int i=0; i<prev_points.size(); ++i)
     {
         p.x = prev_points[i].tri_kp.x;
         p.y = prev_points[i].tri_kp.y;
@@ -329,7 +331,7 @@ void printTriangulatedPts(
         m.scale.x = 0.1;
         m.scale.y = 0.1;
         m.action = visualization_msgs::msg::Marker::ADD;
-        for (size_t i=0; i<points.size(); ++i)
+        for (int i=0; i<points.size(); ++i)
         {
             p.x = points[i].tri_kp.x;
             p.y = points[i].tri_kp.y;
@@ -351,7 +353,7 @@ void printTriangulatedPts(
         m.color.g = 1.0;
         m.color.b = 0.0;
         m.action = visualization_msgs::msg::Marker::ADD;
-        for(size_t i=0; i<corr_idx.size(); ++i)
+        for(int i=0; i<corr_idx.size(); ++i)
         {
             p.x = prev_points[corr_idx[i].first].tri_kp.x;
             p.y = prev_points[corr_idx[i].first].tri_kp.y;
@@ -413,13 +415,13 @@ int main(int argc, char* argv[])
     
     // camera intrinsic matrix obtained from KITTI's calibration.txt file
     cv::Matx33d K(
-        9.591977e+02, 0.000000e+00, 6.944383e+02, 
-        0.000000e+00, 9.529324e+02, 2.416793e+02, 
-        0.000000e+00, 0.000000e+00, 1.000000e+00
+        7.188560000000e+02, 0.000000000000e+00, 6.071928000000e+02, 
+        0.000000000000e+00, 7.188560000000e+02, 1.852157000000e+02, 
+        0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00
     );
 
     // path to video file
-    cv::VideoCapture cap("/home/dev_ws/visual_slam/data/video_02.mp4");
+    cv::VideoCapture cap("/home/dev_ws/visual_slam/data/video_2.mp4");
     if (!cap.isOpened())
     {
         fprintf(stderr, "Error opening video.\n");
@@ -462,7 +464,7 @@ int main(int argc, char* argv[])
             VO.process_img(img);
 
             // visualize key points
-            for (size_t i=0; i<VO.prev_frame.points.size(); ++i)
+            for (int i=0; i<VO.prev_frame.points.size(); ++i)
             {
                 cv::circle(img, VO.prev_frame.points[i].filt_kp, 3, cv::Scalar(255, 0.0, 0.0));
             }
@@ -470,8 +472,8 @@ int main(int argc, char* argv[])
             // print triangulated points
             printTriangulatedPts(VO.prev_frame.points, VO.prev_points, VO.corr_idx, tri_kps_pub, node, debug);
             // print odometry
-            size_t curr_pose_idx = VO.poses.size() - 1;
-            size_t prev_pose_idx = curr_pose_idx - 1;
+            int curr_pose_idx = VO.poses.size() - 1;
+            int prev_pose_idx = curr_pose_idx - 1;
             printOdom(VO.poses[curr_pose_idx], VO.poses[prev_pose_idx], odom_pub, node);
 
             cv::imshow("Front-facing camera", img);
@@ -489,22 +491,22 @@ int main(int argc, char* argv[])
                 // print triangulated points
                 printTriangulatedPts(VO.prev_frame.points, VO.prev_points, VO.corr_idx, tri_kps_pub, node, debug);
                 // print odometry
-                size_t curr_pose_idx = VO.poses.size() - 1;
-                size_t prev_pose_idx = curr_pose_idx - 1;
+                int curr_pose_idx = VO.poses.size() - 1;
+                int prev_pose_idx = curr_pose_idx - 1;
                 printOdom(VO.poses[curr_pose_idx], VO.poses[prev_pose_idx], odom_pub, node);
 
                 // visualize filtered key points
-                for (size_t i=0; i<VO.frame.points.size(); ++i)
+                for (int i=0; i<VO.frame.points.size(); ++i)
                 {
                     cv::circle(img, VO.frame.points[i].filt_kp, 3, cv::Scalar(0.0, 0.0, 255));
                 }
-                for (size_t i=0; i<VO.prev_frame.points.size(); ++i)
+                for (int i=0; i<VO.prev_frame.points.size(); ++i)
                 {
                     cv::circle(prev_img, VO.prev_frame.points[i].filt_kp, 3, cv::Scalar(0.0, 0.0, 255));
                 }
 
                 // highlight points that appears in consecutive feature matching
-                for (size_t i=0; i<VO.corr_idx.size(); ++i)
+                for (int i=0; i<VO.corr_idx.size(); ++i)
                 {
                     cv::circle(img, VO.prev_points[VO.corr_idx[i].second].filt_kp, 5, cv::Scalar(0.0, 255, 0.0));
                     cv::circle(prev_img, VO.prev_frame.points[VO.corr_idx[i].first].filt_kp, 5, cv::Scalar(0.0, 255, 0.0));
@@ -513,7 +515,7 @@ int main(int argc, char* argv[])
                 cv::vconcat(img, prev_img, two_imgs);
 
                 // draw correspondence lines
-                for (size_t i=0; i<VO.corr_idx.size(); ++i)
+                for (int i=0; i<VO.corr_idx.size(); ++i)
                 {
                     cv::line(two_imgs, 
                         VO.prev_points[VO.corr_idx[i].second].filt_kp, 

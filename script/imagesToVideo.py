@@ -1,9 +1,9 @@
 import cv2
 import os
 
-# 1. Define the folder containing your image sequence and the output video file name
-image_folder = '/home/dev_ws/visual_slam/data/image_02/data/'
-video_name = 'video_02.mp4'
+# 1. Define the folder containing your image sequence and the output video file path
+image_folder = '/home/dev_ws/visual_slam/data/image_2/'
+video_name = '/home/dev_ws/visual_slam/data/video_2.mp4'
 
 # 2. Load and sort the images based on their filenames numerically
 images = [img for img in os.listdir(image_folder) if img.endswith(".png")]
