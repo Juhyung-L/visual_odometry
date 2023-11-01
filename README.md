@@ -1,2 +1,2 @@
-# visual_slam
-Visual SLAM using OpenCV
+# visual_odometry
+Visual odometry using OpenCV
