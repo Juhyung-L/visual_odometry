@@ -26,6 +26,3 @@ RUN apt-get update && apt-get install -q -y --no-install-recommends \
 # setup bashrc settings
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
     echo "alias b='source /home/dev_ws/install/setup.bash'" >> ~/.bashrc
-
-RUN git config --global user.email "juhyunglee0313@gmail.com"
-RUN git config --global user.name "Juhyung-L"
