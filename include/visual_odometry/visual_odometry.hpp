@@ -38,62 +38,45 @@ inline Pose3d getPoseFromTransformationMatrix(cv::Matx44d& T)
 
 namespace visual_odometry
 {
-struct Point
-{
-    int kps_idx;
-    cv::Point3d tri_kp;
-    cv::Point2d filt_kp;
-    cv::Vec3b color; // stored in BGR order
-    Point(int kps_idx, cv::Point2d filt_kp, cv::Point3d tri_kp, cv::Vec3b color): kps_idx(kps_idx), filt_kp(filt_kp), tri_kp(tri_kp), color(color)
-    {}
-};
-
 // class for storing all the information related to an image frame
 class Frame
 {
 public:
     Frame()
     {
-
     }
 
     void clear()
     {
         kps.clear();
-        points.clear();
+        filt_kps.clear();
     }
 
     std::vector<cv::KeyPoint> kps;
+    std::vector<cv::Point2d> filt_kps;
     cv::Mat desc;
     cv::Matx44d T = cv::Matx44d::eye(); // identity transformation matrix
-    std::vector<Point> points;
 };
 
 class VisualOdometry
 {
 public:
-    VisualOdometry(cv::Matx33d K, cv::Size img_size);
+    VisualOdometry(cv::Matx33d K);
+    bool setTruePoses(const std::string& true_pose_file);
     void process_img(cv::Mat& img);
-    cv::Matx34d getProjectionMat(const cv::Matx44d& T, const cv::Matx33d& K);
-    void setFirstTrueTranslation(const cv::Vec3d& t);
 
-    std::vector<Pose3d> poses;
+    std::vector<Pose3d> estimated_poses;
+    std::vector<Pose3d> true_poses;
     Frame frame, prev_frame;
-    std::vector<Point> prev_points;
-    std::vector<std::pair<int, int>> corr_idx;
 
 private:
     std::shared_ptr<cv::SIFT> sift;
     std::shared_ptr<cv::FlannBasedMatcher> fbm;
-    std::shared_ptr<cv::BFMatcher> bf;
     cv::Matx33d K;
-    cv::Size img_size;
-    cv::Vec3d first_true_translation;
-    bool first_translation = true;
+    int true_pose_idx = 0;
 
     // constants
     const int min_recover_pose_inlier_count = 150;
-    const int min_corr_idx_count = 150;
 };
 }
 
