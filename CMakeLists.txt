@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
 project(visual_odometry)
 
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -9,13 +9,12 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
 find_package(OpenCV REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package (Eigen3 3.3 REQUIRED NO_MODULE)
 
 include_directories(
   include
@@ -29,9 +28,9 @@ set(dependencies
   std_msgs
 )
 
-add_executable(visual_odometry src/visual_odometry.cpp)
-target_link_libraries(visual_odometry ${OpenCV_LIBRARIES})
-ament_target_dependencies(visual_odometry ${dependencies})
+add_executable(main src/main.cpp src/visual_odometry.cpp)
+target_link_libraries(main ${OpenCV_LIBRARIES} Eigen3::Eigen)
+ament_target_dependencies(main ${dependencies})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -46,7 +45,7 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS
-  visual_odometry
+  main
   DESTINATION lib/${PROJECT_NAME}
 )
 
