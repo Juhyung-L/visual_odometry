@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
 project(visual_odometry)
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -13,7 +13,6 @@ find_package(OpenCV REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
 find_package (Eigen3 3.3 REQUIRED NO_MODULE)
 
 include_directories(
@@ -25,7 +24,6 @@ set(dependencies
   rclcpp
   geometry_msgs
   visualization_msgs
-  std_msgs
 )
 
 add_executable(main src/main.cpp src/visual_odometry.cpp)

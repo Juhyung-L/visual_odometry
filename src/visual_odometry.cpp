@@ -27,7 +27,6 @@ bool VisualOdometry::setTruePoses(const std::string& true_pose_file)
     std::ifstream f(true_pose_file);
     if (!f.is_open())
     {
-        std::cout << "Could not open file: " << true_pose_file << std::endl; 
         return false;
     }
    
@@ -61,7 +60,7 @@ void VisualOdometry::process_img(cv::Mat& img)
 {
     prev_frame = frame; // store current frame information
     frame.clear();
-    ++true_pose_idx;
+    ++pose_idx;
 
     // detect features
     cv::Mat gray_img;
@@ -114,7 +113,6 @@ void VisualOdometry::process_img(cv::Mat& img)
     // apply the translation only if the inlier_count is greater than the threshold
     if (inlier_count < min_recover_pose_inlier_count)
     {
-        std::cout << "recoverPose inlier count below threshold. Skipping this frame.\n";
         estimated_poses.push_back(getPoseFromTransformationMatrix(frame.T)); // append current pose without applying the transform
         return;
     }
@@ -126,7 +124,7 @@ void VisualOdometry::process_img(cv::Mat& img)
                                          0.0,    0.0,    0.0,    1.0);
 
     // get the scale of translation from ground truth
-    cv::Vec3d true_translation(true_poses[true_pose_idx](0), true_poses[true_pose_idx](1), true_poses[true_pose_idx](2));
+    cv::Vec3d true_translation(true_poses[pose_idx](0), true_poses[pose_idx](1), true_poses[pose_idx](2));
     double estimated_dist = cv::norm(cv::Vec3d(frame.T(0, 3), frame.T(1, 3), frame.T(2, 3)));
     double true_dist = cv::norm(true_translation);
     double correction_factor = true_dist / estimated_dist;
@@ -136,5 +134,17 @@ void VisualOdometry::process_img(cv::Mat& img)
     frame.T(2, 3) *= correction_factor;
 
     estimated_poses.push_back(getPoseFromTransformationMatrix(frame.T));
+
+    // print accumulated error
+    std::cout << "Error in position: "
+              << "\nx: " << true_poses[pose_idx](0) - estimated_poses[pose_idx](0)
+              << "\ny: " << true_poses[pose_idx](1) - estimated_poses[pose_idx](1)
+              << "\nz: " << true_poses[pose_idx](2) - estimated_poses[pose_idx](2)
+              << "\nError in orientation: "
+              << "\nx: " << true_poses[pose_idx](3) - estimated_poses[pose_idx](3)
+              << "\ny: " << true_poses[pose_idx](4) - estimated_poses[pose_idx](4)
+              << "\nz: " << true_poses[pose_idx](5) - estimated_poses[pose_idx](5)
+              << "\nw: " << true_poses[pose_idx](6) - estimated_poses[pose_idx](6)
+              << std::endl;
 }
 }

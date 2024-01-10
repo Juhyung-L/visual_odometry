@@ -32,7 +32,7 @@ public:
         m.frame_locked = false;
         m.id = node_->now().nanoseconds();
         m.type = visualization_msgs::msg::Marker::LINE_STRIP;
-        m.scale.x = 1.0;
+        m.scale.x = 2.0;
         // make sure alpha and color is set or else the points will be invisible
         m.color.a = 1.0;
         m.color.r = 1.0; // red
@@ -63,12 +63,12 @@ public:
         m.frame_locked = false;
         m.id = node_->now().nanoseconds();
         m.type = visualization_msgs::msg::Marker::LINE_LIST;
-        m.scale.x = 1.0;
+        m.scale.x = 2.0;
         // make sure alpha and color is set or else the points will be invisible
         m.color.a = 1.0;
         m.color.r = 0.0;
-        m.color.g = 0.0;
-        m.color.b = 1.0; // blue
+        m.color.g = 1.0; // green
+        m.color.b = 0.0;
         m.action = visualization_msgs::msg::Marker::ADD;
 
         geometry_msgs::msg::Point p;

@@ -73,7 +73,7 @@ private:
     std::shared_ptr<cv::SIFT> sift;
     std::shared_ptr<cv::FlannBasedMatcher> fbm;
     cv::Matx33d K;
-    int true_pose_idx = 0;
+    int pose_idx = -1;
 
     // constants
     const int min_recover_pose_inlier_count = 150;
