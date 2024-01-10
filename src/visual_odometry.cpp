@@ -136,15 +136,12 @@ void VisualOdometry::process_img(cv::Mat& img)
     estimated_poses.push_back(getPoseFromTransformationMatrix(frame.T));
 
     // print accumulated error
-    std::cout << "Error in position: "
-              << "\nx: " << true_poses[pose_idx](0) - estimated_poses[pose_idx](0)
-              << "\ny: " << true_poses[pose_idx](1) - estimated_poses[pose_idx](1)
-              << "\nz: " << true_poses[pose_idx](2) - estimated_poses[pose_idx](2)
-              << "\nError in orientation: "
-              << "\nx: " << true_poses[pose_idx](3) - estimated_poses[pose_idx](3)
-              << "\ny: " << true_poses[pose_idx](4) - estimated_poses[pose_idx](4)
-              << "\nz: " << true_poses[pose_idx](5) - estimated_poses[pose_idx](5)
-              << "\nw: " << true_poses[pose_idx](6) - estimated_poses[pose_idx](6)
+    std::cout << "Error in position: \t" << "Error in orientation: "
+              << "\nx: " << true_poses[pose_idx](0) - estimated_poses[pose_idx](0) << "\t\t" << "x: " << true_poses[pose_idx](3) - estimated_poses[pose_idx](3)
+              << "\ny: " << true_poses[pose_idx](1) - estimated_poses[pose_idx](1) << "\t\t" << "y: " << true_poses[pose_idx](4) - estimated_poses[pose_idx](4)
+              << "\nz: " << true_poses[pose_idx](2) - estimated_poses[pose_idx](2) << "\t\t" << "z: " << true_poses[pose_idx](5) - estimated_poses[pose_idx](5)
+              << "\n\t\t\tw: " << true_poses[pose_idx](6) - estimated_poses[pose_idx](6)
               << std::endl;
+
 }
 }

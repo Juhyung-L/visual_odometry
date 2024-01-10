@@ -1,3 +1,6 @@
+#include <fstream>
+#include <iostream>
+
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/imgproc.hpp>
@@ -25,7 +28,7 @@ int main(int argc, char* argv[])
     cv::VideoCapture cap("/home/dev_ws/visual_odometry/data/video_2.mp4");
     if (!cap.isOpened())
     {
-        fprintf(stderr, "Error opening video.\n");
+        std::cout << "Error opening video.\n";
         return -1;
     }
     // get fps
@@ -34,6 +37,14 @@ int main(int argc, char* argv[])
     visual_odometry::VisualOdometry VO(K);
     if (!VO.setTruePoses("/home/dev_ws/visual_odometry/data/00.txt"))
     {
+        std::cout << "Error setting true pose.\n";
+        return -1;
+    }
+
+    std::ofstream error_log("error_log.txt");
+    if (!error_log.is_open())
+    {
+        std::cout << "Error opening error log file.\n";
         return -1;
     }
 
@@ -60,9 +71,13 @@ int main(int argc, char* argv[])
             cv::circle(img, VO.frame.filt_kps[i], 3, cv::Scalar(255, 0.0, 0.0));
         }
 
-        // print odometry
         int curr_pose_idx = VO.estimated_poses.size() - 1;
-        if (curr_pose_idx == 0)
+
+        // log error
+        error_log << VO.true_poses[curr_pose_idx] - VO.estimated_poses[curr_pose_idx] << std::endl;
+        
+        // print odometry
+        if (curr_pose_idx <= 0)
         {
             continue;
         }
@@ -76,6 +91,7 @@ int main(int argc, char* argv[])
         }
         
     }
+    error_log.close();
     cap.release();
     cv::destroyAllWindows();
     rclcpp::shutdown();
