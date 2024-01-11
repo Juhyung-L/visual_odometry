@@ -8,8 +8,6 @@ Results:
 
 ![Screenshot from 2024-01-10 14-53-37](https://github.com/Juhyung-L/visual_odometry/assets/102873080/523ff3e0-3fcf-48b9-b24d-1533a0d06378)
 
-![Screenshot from 2024-01-10 14-53-37](https://github.com/Juhyung-L/visual_odometry/assets/102873080/88dc5c5c-5841-46ff-b38c-304ce83ea09c)
-
 Graph comparison between ground-truth pose and estimated pose.
 
 ![Screenshot from 2024-01-10 14-52-40](https://github.com/Juhyung-L/visual_odometry/assets/102873080/fff83107-9d63-41b0-a5b5-25e0281250a8)
