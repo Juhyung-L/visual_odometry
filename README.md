@@ -1,10 +1,19 @@
 # visual_odometry
 Visual odometry using OpenCV
+SIFT features are extracted from each frame of the KITTI dataset video. Features from subsequent frames are matched to estimate the change in pose of the camera. This is just a raw visual odometry without any error correction techniques, such as loop closure and pose graph optimization. Hence, there is severe odometric drift.
 
-Blog post: https://juhyungsprojects.blogspot.com/2023/10/visual-odometry-using-sift-feature.html
+Detailed explanation at: https://juhyungsprojects.blogspot.com/2023/10/visual-odometry-using-sift-feature.html
+
+Results:
+
+![Screenshot from 2024-01-10 14-53-37](https://github.com/Juhyung-L/visual_odometry/assets/102873080/523ff3e0-3fcf-48b9-b24d-1533a0d06378)
+
+![Screenshot from 2024-01-10 14-53-37](https://github.com/Juhyung-L/visual_odometry/assets/102873080/88dc5c5c-5841-46ff-b38c-304ce83ea09c)
+
+Graph comparison between ground-truth pose and estimated pose.
+
+![Screenshot from 2024-01-10 14-52-40](https://github.com/Juhyung-L/visual_odometry/assets/102873080/fff83107-9d63-41b0-a5b5-25e0281250a8)
+
 
 Footages:
-
-[visual_odometry_1.webm](https://github.com/Juhyung-L/visual_odometry/assets/102873080/f9d01b0e-09d7-4062-ac1c-92d6aaa42a2b)
-
-[visual_odometry_2.webm](https://github.com/Juhyung-L/visual_odometry/assets/102873080/8e9d63f9-8309-4395-9406-911422276aaa)
+[![Watch the video](https://img.youtube.com/vi/pQ5rXVprvJE/maxresdefault.jpg)](http://https://www.youtube.com/pQ5rXVprvJE "Visual Odometry (KITTI Dataset)")
