@@ -8,7 +8,7 @@
       "includePath": [
         "/opt/ros/humble/include/**",
         "/usr/include/**",
-        "/home/dev_ws/visual_odometry/include/**"
+        "/home/dev_ws/src/visual_odometry/include/**"
       ],
       "name": "ROS",
       "intelliSenseMode": "gcc-x64",
