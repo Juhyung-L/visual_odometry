@@ -24,8 +24,11 @@ int main(int argc, char* argv[])
         0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00
     );
 
+    std::string video_file_path = "/home/dev_ws/src/visual_odometry/data/video.mp4";
+    std::string true_pose_file_path = "/home/dev_ws/src/visual_odometry/data/00.txt";
+
     // path to video file
-    cv::VideoCapture cap("/home/dev_ws/visual_odometry/data/video_2.mp4");
+    cv::VideoCapture cap(video_file_path);
     if (!cap.isOpened())
     {
         std::cout << "Error opening video.\n";
@@ -35,7 +38,7 @@ int main(int argc, char* argv[])
     double fps = cap.get(cv::CAP_PROP_FPS);
     
     visual_odometry::VisualOdometry VO(K);
-    if (!VO.setTruePoses("/home/dev_ws/visual_odometry/data/00.txt"))
+    if (!VO.setTruePoses(true_pose_file_path))
     {
         std::cout << "Error setting true pose.\n";
         return -1;
