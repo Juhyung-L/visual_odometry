@@ -16,7 +16,7 @@
 				"--volume=/tmp/.X11-unix:/tmp/.X11-unix", // share host XServer with container
 				"--name=visual_slam_cont"
 	],
-	"workspaceFolder": "/home/dev_ws",
+	"workspaceFolder": "/home/dev_ws/src",
 	"mounts": [
 		"source=visual_slam_cont_volume,target=/home/dev_ws,type=volume"
 	],

@@ -9,7 +9,7 @@
             "request": "launch",
             "type": "cppdbg",
             "cwd": "/",
-            "program": "/home/dev_ws/install/visual_slam/lib/visual_slam/visual_slam",
+            "program": "/home/dev_ws/install/visual_odometry/lib/visual_odometry/main",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",

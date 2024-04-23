@@ -24,8 +24,8 @@ int main(int argc, char* argv[])
         0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00
     );
 
-    std::string video_file_path = "/home/dev_ws/src/visual_odometry/data/video.mp4";
-    std::string true_pose_file_path = "/home/dev_ws/src/visual_odometry/data/00.txt";
+    std::string video_file_path = "/home/dev_ws/src/data/video.mp4";
+    std::string true_pose_file_path = "/home/dev_ws/src/data/00.txt";
 
     // path to video file
     cv::VideoCapture cap(video_file_path);
