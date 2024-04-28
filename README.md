@@ -14,4 +14,4 @@ Graph comparison between ground-truth pose and estimated pose.
 
 
 Footages:
-[![Watch the video](https://img.youtube.com/vi/pQ5rXVprvJE/maxresdefault.jpg)](https://www.youtube.com/pQ5rXVprvJE "Visual Odometry (KITTI Dataset)")
+[![Watch the video](https://img.youtube.com/vi/pQ5rXVprvJE/maxresdefault.jpg)](https://www.youtube.com/watch?v=pQ5rXVprvJE "Visual Odometry (KITTI Dataset)")
