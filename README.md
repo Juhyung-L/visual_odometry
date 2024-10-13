@@ -2,7 +2,7 @@
 Visual odometry using OpenCV
 SIFT features are extracted from each frame of the KITTI dataset video. Features from subsequent frames are matched to estimate the change in pose of the camera. This is just a raw visual odometry without any error correction techniques, such as loop closure and pose graph optimization. Hence, there is severe odometric drift.
 
-Detailed explanation at: https://juhyungsprojects.blogspot.com/2023/10/visual-odometry-using-sift-feature.html
+Detailed explanation at: https://juhyunglee0313.wixsite.com/portfolio/post/monocular-visual-odometry
 
 Results:
 
